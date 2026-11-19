@@ -944,7 +944,6 @@ function completePayment() {
   o.paidAt = paymentTime.toISOString();
   o.updatedAt = paymentTime.toISOString();
 
-  // Clear active order & coupon so a new order starts clean
   currentOrderId = null;
   save("qd_currentOrder", null);
   discountRate = 0;
