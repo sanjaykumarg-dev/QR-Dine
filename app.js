@@ -56,7 +56,9 @@ const MENU_IMAGES_BUCKET = "menu-images";
 const urlParams = new URLSearchParams(location.search);
 
 const savedSessionTable = Number(sessionStorage.getItem("qd_selected_table"));
-let tableNo = Number(urlParams.get("table")) || (savedSessionTable >= 1 && savedSessionTable <= 12 ? savedSessionTable : 1);
+let tableNo =
+  Number(urlParams.get("table")) ||
+  (savedSessionTable >= 1 && savedSessionTable <= 12 ? savedSessionTable : 1);
 let qrCode =
   urlParams.get("qr") || `${HOTEL_CODE}-TABLE${String(tableNo).padStart(2, "0")}`;
 let activeCategory = "All";
@@ -70,6 +72,7 @@ let activeModalFoodId = null;
 let modalFoodQty = 1;
 let selectedFoodImageFile = null;
 let selectedFoodPreviewUrl = null;
+let paymentRedirectTimer = null;
 
 const statusOptions = ["Pending", "Preparing", "Ready", "Served"];
 
@@ -662,6 +665,9 @@ async function placeOrder() {
 
   if (data.tracking_token && !trackingTokens.includes(data.tracking_token)) {
     trackingTokens.push(data.tracking_token);
+    if (trackingTokens.length > 5) {
+      trackingTokens = trackingTokens.slice(-5);
+    }
   }
 
   save("qd_trackingTokens", trackingTokens);
@@ -691,7 +697,7 @@ function overallStatus(o) {
   return "Pending";
 }
 
-/* WAITING PAGE */
+/* WAITING PAGE - PARALLEL FETCHING */
 
 async function renderWaiting() {
   const box = document.getElementById("waitingContent");
@@ -708,21 +714,22 @@ async function renderWaiting() {
     return;
   }
 
+  const recentTokens = trackingTokens.slice(-5);
+
+  const results = await Promise.all(
+    recentTokens.map((token) =>
+      supabaseClient
+        .rpc("get_customer_order", { p_tracking_token: token })
+        .then(({ data, error }) => ({ token, data, error })),
+    ),
+  );
+
   trackedOrders = [];
 
-  for (const token of trackingTokens) {
-    const { data, error } = await supabaseClient.rpc("get_customer_order", {
-      p_tracking_token: token,
-    });
+  for (const { token, data, error } of results) {
+    if (error || !data || !data.order) continue;
 
-    if (error) {
-      console.error("Order tracking error:", error);
-      continue;
-    }
-
-    if (!data || !data.order) continue;
-
-    const order = {
+    trackedOrders.push({
       id: data.order.id,
       orderNumber: data.order.order_number,
       table: data.order.table_number,
@@ -737,9 +744,7 @@ async function renderWaiting() {
         time: item.preparation_time,
         status: item.status,
       })),
-    };
-
-    trackedOrders.push(order);
+    });
   }
 
   if (!trackedOrders.length) {
@@ -754,9 +759,8 @@ async function renderWaiting() {
   }
 
   const latest = trackedOrders[trackedOrders.length - 1];
-
   orders = trackedOrders;
-  currentOrderId = latest.id;
+  if (!currentOrderId) currentOrderId = latest.id;
 
   box.innerHTML = trackedOrders
     .slice()
@@ -835,7 +839,9 @@ function stopCustomerTracking() {
 }
 
 function trackOrderPayment(orderId) {
-  const order = trackedOrders.find((o) => o.id === orderId);
+  const order =
+    trackedOrders.find((o) => o.id === orderId) ||
+    orders.find((o) => o.id === orderId);
 
   if (!order) return;
 
@@ -923,8 +929,6 @@ function applyDiscount() {
   updatePayment();
 }
 
-let paymentRedirectTimer = null;
-
 function completePayment() {
   let o = getBillOrder();
 
@@ -959,7 +963,7 @@ function completePayment() {
     <p>Payment: ${money(bill.total)}</p>
     <p>Payment Mode: ${mode}</p>
     <p>Payment Time: ${paymentTime.toLocaleString("en-IN")}</p>
-    <p class="muted">Returning to the menu in 3 seconds...</p>
+    <p class="muted">Returning to the menu shortly...</p>
     <button type="button" class="primary" onclick="returnToMenuAfterPayment()">Back to Menu Now</button>
   `;
 
@@ -968,7 +972,7 @@ function completePayment() {
   if (paymentRedirectTimer) clearTimeout(paymentRedirectTimer);
   paymentRedirectTimer = setTimeout(() => {
     returnToMenuAfterPayment();
-  }, 3000);
+  }, 1500);
 }
 
 function returnToMenuAfterPayment() {
@@ -1142,7 +1146,11 @@ async function copyAdminQrLink() {
 
 function adminEscape(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
   })[char]);
 }
 
@@ -1161,14 +1169,18 @@ async function fetchAdminDashboard() {
   const countLabel = document.getElementById("adminOrderCount");
   const updatedLabel = document.getElementById("adminUpdatedAt");
 
-  statsBox.innerHTML = '<div class="stat"><small>Dashboard</small><b>Loading…</b></div>';
-  tablesBox.innerHTML = '<div class="admin-empty">Fetching the latest restaurant orders…</div>';
+  statsBox.innerHTML =
+    '<div class="stat"><small>Dashboard</small><b>Loading…</b></div>';
+  tablesBox.innerHTML =
+    '<div class="admin-empty">Fetching the latest restaurant orders…</div>';
   countLabel.textContent = "Loading orders…";
 
   try {
     const { data: orderRows, error: orderError } = await supabaseClient
       .from("orders")
-      .select("id, order_number, table_number, status, total_amount, is_paid, created_at, hotel_id")
+      .select(
+        "id, order_number, table_number, status, total_amount, is_paid, created_at, hotel_id",
+      )
       .eq("hotel_id", STAFF_HOTEL_ID)
       .order("created_at", { ascending: false })
       .limit(200);
@@ -1195,8 +1207,13 @@ async function fetchAdminDashboard() {
     const rows = orderRows || [];
     const activeOrders = rows.filter(adminOrderIsActive);
     const paidOrders = rows.filter((order) => order.is_paid === true);
-    const revenue = paidOrders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
-    const activeTables = new Set(activeOrders.map((order) => Number(order.table_number))).size;
+    const revenue = paidOrders.reduce(
+      (sum, order) => sum + Number(order.total_amount || 0),
+      0,
+    );
+    const activeTables = new Set(
+      activeOrders.map((order) => Number(order.table_number)),
+    ).size;
 
     const metrics = [
       ["Total orders", rows.length, "All recorded orders"],
@@ -1206,40 +1223,59 @@ async function fetchAdminDashboard() {
       ["Recorded revenue", money(revenue), "From paid orders"],
     ];
 
-    statsBox.innerHTML = metrics.map(([label, value, hint]) => `
+    statsBox.innerHTML = metrics
+      .map(
+        ([label, value, hint]) => `
       <div class="stat admin-stat-card">
         <small>${label}</small>
         <b>${value}</b>
         <span>${hint}</span>
-      </div>`).join("");
+      </div>`,
+      )
+      .join("");
 
     countLabel.textContent = `${rows.length} order(s) loaded`;
     updatedLabel.textContent = `Updated ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
 
     if (!rows.length) {
-      tablesBox.innerHTML = '<div class="admin-empty"><div>🍽️</div><h3>No orders yet</h3><p>Customer orders will appear here as soon as they are placed.</p></div>';
+      tablesBox.innerHTML =
+        '<div class="admin-empty"><div>🍽️</div><h3>No orders yet</h3><p>Customer orders will appear here as soon as they are placed.</p></div>';
       return;
     }
 
-    const tableNumbers = [...new Set(rows.map((order) => Number(order.table_number)))].sort((a, b) => a - b);
-    tablesBox.innerHTML = tableNumbers.map((tableNumber) => {
-      const tableOrders = rows.filter((order) => Number(order.table_number) === tableNumber);
-      const hasActive = tableOrders.some(adminOrderIsActive);
-      const orderMarkup = tableOrders.map((order) => {
-        const orderItems = itemsByOrder[order.id] || [];
-        const orderStatus = order.status || (order.is_paid ? "Paid" : "Pending");
-        const orderLabel = order.order_number || order.id;
-        const created = order.created_at
-          ? new Date(order.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
-          : "Time unavailable";
-        const itemsMarkup = orderItems.length
-          ? orderItems.map((item) => `
+    const tableNumbers = [
+      ...new Set(rows.map((order) => Number(order.table_number))),
+    ].sort((a, b) => a - b);
+    tablesBox.innerHTML = tableNumbers
+      .map((tableNumber) => {
+        const tableOrders = rows.filter(
+          (order) => Number(order.table_number) === tableNumber,
+        );
+        const hasActive = tableOrders.some(adminOrderIsActive);
+        const orderMarkup = tableOrders
+          .map((order) => {
+            const orderItems = itemsByOrder[order.id] || [];
+            const orderStatus =
+              order.status || (order.is_paid ? "Paid" : "Pending");
+            const orderLabel = order.order_number || order.id;
+            const created = order.created_at
+              ? new Date(order.created_at).toLocaleTimeString("en-IN", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+              : "Time unavailable";
+            const itemsMarkup = orderItems.length
+              ? orderItems
+                  .map(
+                    (item) => `
               <div class="admin-order-item">
                 <span>${adminEscape(item.food_name)} <b>× ${Number(item.quantity || 0)}</b></span>
                 <span class="status ${adminEscape(item.status || "Pending")}">${adminEscape(item.status || "Pending")}</span>
-              </div>`).join("")
-          : '<p class="muted admin-no-items">Item details unavailable for this order.</p>';
-        return `
+              </div>`,
+                  )
+                  .join("")
+              : '<p class="muted admin-no-items">Item details unavailable for this order.</p>';
+            return `
           <div class="admin-order-block">
             <div class="admin-order-heading">
               <div><b>Order ${adminEscape(orderLabel)}</b><small>${created}</small></div>
@@ -1248,9 +1284,10 @@ async function fetchAdminDashboard() {
             ${itemsMarkup}
             <div class="admin-order-total"><span>${order.is_paid ? "Paid" : "Unpaid"}</span><b>${money(order.total_amount)}</b></div>
           </div>`;
-      }).join("");
+          })
+          .join("");
 
-      return `
+        return `
         <article class="table-card admin-table-card">
           <div class="admin-table-heading">
             <div><p class="eyebrow">DINING TABLE</p><h3>Table ${String(tableNumber).padStart(2, "0")}</h3></div>
@@ -1259,10 +1296,12 @@ async function fetchAdminDashboard() {
           <p class="muted admin-table-meta">${tableOrders.length} order(s)</p>
           ${orderMarkup}
         </article>`;
-    }).join("");
+      })
+      .join("");
   } catch (error) {
     console.error("Admin dashboard loading error:", error);
-    statsBox.innerHTML = '<div class="admin-empty admin-error">Could not load dashboard statistics.</div>';
+    statsBox.innerHTML =
+      '<div class="admin-empty admin-error">Could not load dashboard statistics.</div>';
     tablesBox.innerHTML = `<div class="admin-empty admin-error"><h3>Unable to load orders</h3><p>${adminEscape(error.message || "Check your Supabase connection and staff permissions.")}</p><button class="secondary" onclick="fetchAdminDashboard()">Try again</button></div>`;
     countLabel.textContent = "Orders unavailable";
     toast("Could not load admin dashboard.");
@@ -1570,7 +1609,9 @@ function handleFoodImageSelect(event) {
 
   if (!file) {
     selectedFoodImageFile = null;
-    if (hint) hint.textContent = "Choose a photo from your phone or PC (JPG, PNG, WebP).";
+    if (hint)
+      hint.textContent =
+        "Choose a photo from your phone or PC (JPG, PNG, WebP).";
     syncPreviewFromUrl();
     return;
   }
@@ -1647,10 +1688,11 @@ function compressFoodImage(file, maxWidth = 800, quality = 0.82) {
 
 async function uploadDishPhotoToSupabase(file, dishName) {
   const compressedBlob = await compressFoodImage(file);
-  const safeSlug = (dishName || "dish")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "") || "dish";
+  const safeSlug =
+    (dishName || "dish")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "dish";
   const filePath = `hotel-${STAFF_HOTEL_ID}/${Date.now()}-${safeSlug}.jpg`;
 
   const { error: uploadError } = await supabaseClient.storage
@@ -1700,7 +1742,9 @@ function clearFoodForm() {
   if (fileInput) fileInput.value = "";
 
   const hint = document.getElementById("foodImageFileHint");
-  if (hint) hint.textContent = "Choose a photo from your phone or PC (JPG, PNG, WebP).";
+  if (hint)
+    hint.textContent =
+      "Choose a photo from your phone or PC (JPG, PNG, WebP).";
 
   const preview = document.getElementById("foodImagePreview");
   if (preview) preview.src = imageFallback;
@@ -1720,7 +1764,9 @@ function editFood(id) {
   if (fileInput) fileInput.value = "";
 
   const hint = document.getElementById("foodImageFileHint");
-  if (hint) hint.textContent = "Upload a new photo to replace the current image, or leave blank to keep it.";
+  if (hint)
+    hint.textContent =
+      "Upload a new photo to replace the current image, or leave blank to keep it.";
 
   document.getElementById("foodId").value = f.id;
   document.getElementById("foodName").value = f.name;
@@ -1760,10 +1806,13 @@ async function saveFood() {
 
   const saveButton = document.querySelector(".editor-actions .primary");
   saveButton.disabled = true;
-  saveButton.textContent = selectedFoodImageFile ? "Uploading photo..." : "Saving...";
+  saveButton.textContent = selectedFoodImageFile
+    ? "Uploading photo..."
+    : "Saving...";
 
   try {
-    let imageUrl = document.getElementById("foodImage").value.trim() || imageFallback;
+    let imageUrl =
+      document.getElementById("foodImage").value.trim() || imageFallback;
 
     if (selectedFoodImageFile) {
       imageUrl = await uploadDishPhotoToSupabase(selectedFoodImageFile, name);
@@ -1802,10 +1851,17 @@ async function saveFood() {
     await fetchFoods();
     renderAnalytics();
     clearFoodForm();
-    toast(id ? "Food item updated in the database." : "Food item added to the database.");
+    toast(
+      id
+        ? "Food item updated in the database."
+        : "Food item added to the database.",
+    );
   } catch (error) {
     console.error("Menu save error:", error);
-    toast("Could not save item: " + (error.message || "Check storage bucket and RLS policies."));
+    toast(
+      "Could not save item: " +
+        (error.message || "Check storage bucket and RLS policies."),
+    );
   } finally {
     saveButton.disabled = false;
     saveButton.textContent = "Save item";
