@@ -123,6 +123,7 @@ let staffUser = null;
 const STAFF_HOTEL_ID = 1;
 const HOTEL_CODE = "HOTEL1";
 const HOTEL_NAME = "QR Dine Demo Hotel";
+const MENU_IMAGES_BUCKET = "menu-images";
 const urlParams = new URLSearchParams(location.search);
 
 let tableNo = Number(urlParams.get("table")) || 1;
@@ -137,6 +138,8 @@ let trackedOrders = [];
 let customerTrackingTimer = null;
 let activeModalFoodId = null;
 let modalFoodQty = 1;
+let selectedFoodImageFile = null;
+let selectedFoodPreviewUrl = null;
 
 const STAFF_CREDENTIALS = {
   admin: { username: "admin", password: "admin123" },
@@ -420,6 +423,7 @@ function foodCard(f) {
   return `
  <article class="food-card" onclick="openFoodDetails(${f.id})">
    <img src="${f.image || imageFallback}" alt="${f.name}"
+   loading="lazy" decoding="async"
    onerror="this.src='${imageFallback}'">
    <div class="food-body">
      <h3>${f.name}</h3>
@@ -1607,7 +1611,118 @@ function renderAnalytics() {
     .join("");
 }
 
-/* MENU MANAGEMENT */
+/* MENU MANAGEMENT & IMAGE UPLOAD */
+
+function handleFoodImageSelect(event) {
+  const file = event.target.files?.[0];
+  const hint = document.getElementById("foodImageFileHint");
+  const preview = document.getElementById("foodImagePreview");
+
+  if (selectedFoodPreviewUrl) {
+    URL.revokeObjectURL(selectedFoodPreviewUrl);
+    selectedFoodPreviewUrl = null;
+  }
+
+  if (!file) {
+    selectedFoodImageFile = null;
+    if (hint) hint.textContent = "Choose a photo from your phone or PC (JPG, PNG, WebP).";
+    syncPreviewFromUrl();
+    return;
+  }
+
+  if (!file.type.startsWith("image/")) {
+    toast("Please select a valid image file.");
+    event.target.value = "";
+    selectedFoodImageFile = null;
+    return;
+  }
+
+  selectedFoodImageFile = file;
+  selectedFoodPreviewUrl = URL.createObjectURL(file);
+  if (preview) preview.src = selectedFoodPreviewUrl;
+  if (hint) {
+    const sizeKb = Math.round(file.size / 1024);
+    hint.textContent = `Selected: ${file.name} (${sizeKb} KB — will auto-compress on save)`;
+  }
+}
+
+function syncPreviewFromUrl() {
+  if (selectedFoodImageFile) return;
+  const preview = document.getElementById("foodImagePreview");
+  const urlVal = document.getElementById("foodImage")?.value.trim();
+  if (preview) {
+    preview.src = urlVal || imageFallback;
+  }
+}
+
+function compressFoodImage(file, maxWidth = 800, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      let width = img.width;
+      let height = img.height;
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error("Image compression failed."));
+            return;
+          }
+          resolve(blob);
+        },
+        "image/jpeg",
+        quality,
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Could not read the selected image file."));
+    };
+
+    img.src = objectUrl;
+  });
+}
+
+async function uploadDishPhotoToSupabase(file, dishName) {
+  const compressedBlob = await compressFoodImage(file);
+  const safeSlug = (dishName || "dish")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "dish";
+  const filePath = `hotel-${STAFF_HOTEL_ID}/${Date.now()}-${safeSlug}.jpg`;
+
+  const { error: uploadError } = await supabaseClient.storage
+    .from(MENU_IMAGES_BUCKET)
+    .upload(filePath, compressedBlob, {
+      contentType: "image/jpeg",
+      upsert: true,
+    });
+
+  if (uploadError) throw uploadError;
+
+  const { data } = supabaseClient.storage
+    .from(MENU_IMAGES_BUCKET)
+    .getPublicUrl(filePath);
+
+  return data.publicUrl;
+}
 
 function openAddFood() {
   clearFoodForm();
@@ -1629,11 +1744,38 @@ function clearFoodForm() {
   });
 
   document.getElementById("foodTime").value = 15;
+
+  if (selectedFoodPreviewUrl) {
+    URL.revokeObjectURL(selectedFoodPreviewUrl);
+    selectedFoodPreviewUrl = null;
+  }
+  selectedFoodImageFile = null;
+
+  const fileInput = document.getElementById("foodImageFile");
+  if (fileInput) fileInput.value = "";
+
+  const hint = document.getElementById("foodImageFileHint");
+  if (hint) hint.textContent = "Choose a photo from your phone or PC (JPG, PNG, WebP).";
+
+  const preview = document.getElementById("foodImagePreview");
+  if (preview) preview.src = imageFallback;
 }
 
 function editFood(id) {
   let f = foods.find((x) => x.id === id);
   if (!f) return;
+
+  if (selectedFoodPreviewUrl) {
+    URL.revokeObjectURL(selectedFoodPreviewUrl);
+    selectedFoodPreviewUrl = null;
+  }
+  selectedFoodImageFile = null;
+
+  const fileInput = document.getElementById("foodImageFile");
+  if (fileInput) fileInput.value = "";
+
+  const hint = document.getElementById("foodImageFileHint");
+  if (hint) hint.textContent = "Upload a new photo to replace the current image, or leave blank to keep it.";
 
   document.getElementById("foodId").value = f.id;
   document.getElementById("foodName").value = f.name;
@@ -1645,6 +1787,9 @@ function editFood(id) {
   document.getElementById("foodIngredients").value = (f.ingredients || []).join(
     ", ",
   );
+
+  const preview = document.getElementById("foodImagePreview");
+  if (preview) preview.src = f.image || imageFallback;
 
   document.getElementById("editorTitle").textContent = "Edit " + f.name;
 
@@ -1668,25 +1813,32 @@ async function saveFood() {
     return;
   }
 
-  const payload = {
-    name,
-    price,
-    category,
-    preparation_time: time,
-    image: document.getElementById("foodImage").value.trim() || imageFallback,
-    description: document.getElementById("foodDescription").value.trim(),
-    ingredients: document
-      .getElementById("foodIngredients")
-      .value.split(",")
-      .map((x) => x.trim())
-      .filter(Boolean),
-  };
-
   const saveButton = document.querySelector(".editor-actions .primary");
   saveButton.disabled = true;
-  saveButton.textContent = "Saving...";
+  saveButton.textContent = selectedFoodImageFile ? "Uploading photo..." : "Saving...";
 
   try {
+    let imageUrl = document.getElementById("foodImage").value.trim() || imageFallback;
+
+    if (selectedFoodImageFile) {
+      imageUrl = await uploadDishPhotoToSupabase(selectedFoodImageFile, name);
+      saveButton.textContent = "Saving item...";
+    }
+
+    const payload = {
+      name,
+      price,
+      category,
+      preparation_time: time,
+      image: imageUrl,
+      description: document.getElementById("foodDescription").value.trim(),
+      ingredients: document
+        .getElementById("foodIngredients")
+        .value.split(",")
+        .map((x) => x.trim())
+        .filter(Boolean),
+    };
+
     let result;
     if (id) {
       result = await supabaseClient
@@ -1708,7 +1860,7 @@ async function saveFood() {
     toast(id ? "Food item updated in the database." : "Food item added to the database.");
   } catch (error) {
     console.error("Menu save error:", error);
-    toast("Could not save item: " + (error.message || "Check foods table and RLS policies."));
+    toast("Could not save item: " + (error.message || "Check storage bucket and RLS policies."));
   } finally {
     saveButton.disabled = false;
     saveButton.textContent = "Save item";
