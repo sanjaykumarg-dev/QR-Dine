@@ -5,7 +5,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>QR Dine | Smart Restaurant</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+  <link rel="stylesheet" href="style.css?v=20261119" />
 </head>
 
 <body>
@@ -335,7 +338,19 @@
           <label>Price (₹)<input id="foodPrice" type="number" min="1" placeholder="Price" /></label>
           <label>Category<input id="foodCategory" placeholder="Main Course" /></label>
           <label>Preparation time (minutes)<input id="foodTime" type="number" min="1" value="15" /></label>
-          <label class="wide">Image URL<input id="foodImage" placeholder="images/dishes/my-dish.jpg" /></label>
+
+          <div class="wide image-upload-field">
+            <label for="foodImageFile">Dish photo (upload from phone/PC)</label>
+            <div class="image-upload-row">
+              <img id="foodImagePreview" class="food-editor-preview" src="images/dishes/default-food.svg" alt="Dish preview" onerror="this.src='images/dishes/default-food.svg'" />
+              <div class="image-upload-controls">
+                <input id="foodImageFile" type="file" accept="image/*" onchange="handleFoodImageSelect(event)" />
+                <p id="foodImageFileHint" class="tiny">Choose a photo from your phone or PC (JPG, PNG, WebP).</p>
+              </div>
+            </div>
+          </div>
+
+          <label class="wide">Or paste Image URL<input id="foodImage" placeholder="images/dishes/my-dish.jpg" oninput="syncPreviewFromUrl()" /></label>
           <label class="wide">Description<input id="foodDescription" placeholder="Short description" /></label>
           <label class="wide">Ingredients (comma separated)<input id="foodIngredients"
               placeholder="Rice, vegetables, spices" /></label>
@@ -408,18 +423,18 @@
       <h2 id="tableSelectionTitle">Select your table</h2>
       <p class="muted">Tap the table number printed on your table.</p>
       <div id="tableButtonGrid" class="table-button-grid">
-        <button type="button" class="table-choice" onclick="chooseTable(1)">01</button>
-        <button type="button" class="table-choice" onclick="chooseTable(2)">02</button>
-        <button type="button" class="table-choice" onclick="chooseTable(3)">03</button>
-        <button type="button" class="table-choice" onclick="chooseTable(4)">04</button>
-        <button type="button" class="table-choice" onclick="chooseTable(5)">05</button>
-        <button type="button" class="table-choice" onclick="chooseTable(6)">06</button>
-        <button type="button" class="table-choice" onclick="chooseTable(7)">07</button>
-        <button type="button" class="table-choice" onclick="chooseTable(8)">08</button>
-        <button type="button" class="table-choice" onclick="chooseTable(9)">09</button>
-        <button type="button" class="table-choice" onclick="chooseTable(10)">10</button>
-        <button type="button" class="table-choice" onclick="chooseTable(11)">11</button>
-        <button type="button" class="table-choice" onclick="chooseTable(12)">12</button>
+        <button type="button" class="table-choice" data-table="1" onclick="chooseTable(1)">01</button>
+        <button type="button" class="table-choice" data-table="2" onclick="chooseTable(2)">02</button>
+        <button type="button" class="table-choice" data-table="3" onclick="chooseTable(3)">03</button>
+        <button type="button" class="table-choice" data-table="4" onclick="chooseTable(4)">04</button>
+        <button type="button" class="table-choice" data-table="5" onclick="chooseTable(5)">05</button>
+        <button type="button" class="table-choice" data-table="6" onclick="chooseTable(6)">06</button>
+        <button type="button" class="table-choice" data-table="7" onclick="chooseTable(7)">07</button>
+        <button type="button" class="table-choice" data-table="8" onclick="chooseTable(8)">08</button>
+        <button type="button" class="table-choice" data-table="9" onclick="chooseTable(9)">09</button>
+        <button type="button" class="table-choice" data-table="10" onclick="chooseTable(10)">10</button>
+        <button type="button" class="table-choice" data-table="11" onclick="chooseTable(11)">11</button>
+        <button type="button" class="table-choice" data-table="12" onclick="chooseTable(12)">12</button>
       </div>
       <p id="tableSelectionError" class="login-error"></p>
     </div>
@@ -455,10 +470,10 @@
     © 2026 QR Dine · Smart ordering for a better dining experience
   </footer>
   <div id="toast" class="toast"></div>
-  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=20261119"></script>
 </body>
 
 </html>
