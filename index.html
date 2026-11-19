@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QR Dine | Smart Restaurant</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" onclick="
+          showPage('menu');
+          return false;
+        ">
+      <span class="brand-mark">QD</span>
+      <span><b>QR DINE</b><small>SMART TABLE SERVICE</small></span>
+    </a>
+    <div class="header-right">
+      <button id="changeTableBtn" class="secondary customer-control" onclick="showTableSelection()">
+        Table <span id="currentTableLabel">01</span> · Change
+      </button>
+      <button class="icon-btn customer-control" onclick="openCartPanel()" aria-label="View cart">
+        🛒 <span id="cartCount">0</span>
+      </button>
+      <button id="staffAccessBtn" class="secondary staff-access" onclick="openStaffLogin()">
+        Staff Login
+      </button>
+      <button id="staffLogoutBtn" class="secondary staff-access hidden" onclick="staffLogout()">
+        Logout
+      </button>
+      <button class="menu-toggle" onclick="toggleNav()" aria-label="Toggle navigation">☰</button>
+    </div>
+  </header>
+
+  <nav id="nav" class="nav">
+    <button class="nav-btn customer-nav active" data-page="menu" onclick="showPage('menu')">
+      Menu
+    </button>
+    <button class="nav-btn customer-nav" data-page="waiting" onclick="showPage('waiting')">
+      Order Status
+    </button>
+    <button class="nav-btn customer-nav" data-page="payment" onclick="showPage('payment')">
+      Payment
+    </button>
+    <button class="nav-btn protected-nav hidden" data-page="admin" data-role="admin" onclick="showPage('admin')">
+      Admin
+    </button>
+    <button class="nav-btn protected-nav hidden" data-page="analytics" data-role="admin"
+      onclick="showPage('analytics')">
+      Analytics
+    </button>
+    <button class="nav-btn protected-nav hidden" data-page="chef" data-role="staff" onclick="showPage('chef')">
+      Chef
+    </button>
+  </nav>
+
+  <main class="container">
+    <!-- CUSTOMER MENU -->
+    <section id="menu" class="page active">
+      <div class="hero">
+        <div>
+          <p class="eyebrow">WELCOME TO</p>
+          <h1>Good food. <em>Good mood.</em></h1>
+          <p>Order your favourites directly from your table.</p>
+          <span class="pill light" id="menuTable">You're ordering at Table 01</span>
+        </div>
+        <div class="hero-art">🍽️</div>
+      </div>
+
+      <div class="menu-layout">
+        <div class="menu-main">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">CHEF'S PICK</p>
+              <h2>Today's Special</h2>
+            </div>
+          </div>
+          <div id="specialCard" class="special-card"></div>
+
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">CUSTOMER FAVOURITES</p>
+              <h2>Most Ordered</h2>
+            </div>
+          </div>
+          <div id="popularList" class="food-grid"></div>
+
+          <div class="section-heading menu-heading">
+            <div>
+              <p class="eyebrow">MADE FRESH FOR YOU</p>
+              <h2>Explore Menu</h2>
+            </div>
+            <input id="menuSearch" class="search" type="search" aria-label="Search menu by dish, description, or category" placeholder="Search dishes..." oninput="renderMenu()" />
+          </div>
+          <div id="categoryFilters" class="filters"></div>
+          <div id="menuList" class="food-grid"></div>
+        </div>
+
+        <!-- CART SIDEBAR: stays visible beside the menu -->
+        <aside id="cartSidebar" class="cart-sidebar summary-card">
+          <div class="cart-sidebar-heading">
+            <div>
+              <p class="eyebrow">YOUR SELECTION</p>
+              <h2>Your Cart <span class="cart-count-badge" id="sidebarCartCount">0</span></h2>
+            </div>
+            <span class="muted" id="cartTableText">Table 01</span>
+          </div>
+          <div id="cartItems" class="stack"></div>
+          <div class="summary-line">
+            <span>Items subtotal</span><b id="cartSubtotal">₹0</b>
+          </div>
+          <div class="summary-line">
+            <span>Estimated preparation</span><b id="cartPrep">—</b>
+          </div>
+          <div class="summary-line total">
+            <span>Total</span><b id="cartTotal">₹0</b>
+          </div>
+          <button class="primary full" onclick="placeOrder()">Place Order</button>
+          <p class="tiny">Taxes and discounts are calculated at payment.</p>
+        </aside>
+      </div>
+    </section>
+
+    <!-- WAITING PAGE -->
+    <section id="waiting" class="page">
+      <div class="page-title">
+        <p class="eyebrow">ORDER TRACKING</p>
+        <h1>We're preparing your food</h1>
+        <p>Track the progress of each item below.</p>
+      </div>
+      <div id="waitingContent"></div>
+    </section>
+
+    <!-- PAYMENT -->
+    <section id="payment" class="page">
+      <div class="page-title">
+        <p class="eyebrow">BILLING</p>
+        <h1>Payment</h1>
+        <p>Review your bill and choose a payment method.</p>
+      </div>
+      <div class="two-col">
+        <div class="summary-card">
+          <h2>Bill details</h2>
+          <div id="billItems"></div>
+          <div class="summary-line">
+            <span>Food bill</span><b id="foodBill">₹0</b>
+          </div>
+          <div class="summary-line">
+            <span>GST (5%)</span><b id="gstAmount">₹0</b>
+          </div>
+          <div class="summary-line">
+            <span>Discount</span><b id="discountAmount">- ₹0</b>
+          </div>
+          <div class="summary-line total">
+            <span>Total bill</span><b id="grandTotal">₹0</b>
+          </div>
+
+          <label class="field-label" for="discountCode">Discount coupon</label>
+          <div class="inline-form">
+            <input id="discountCode" placeholder="Try DINE10" />
+            <button class="secondary" onclick="applyDiscount()">Apply</button>
+          </div>
+          <p id="discountMessage" class="tiny"></p>
+
+          <div class="split-box">
+            <label><input type="checkbox" id="splitToggle" onchange="updatePayment()" />
+              Split bill</label>
+            <div id="splitControls" class="hidden">
+              <label class="field-label">Number of people</label>
+              <input id="splitCount" type="number" min="2" max="20" value="2" oninput="updatePayment()" />
+              <p id="splitAmount" class="tiny"></p>
+            </div>
+          </div>
+        </div>
+
+        <aside class="summary-card">
+          <h2>Choose payment mode</h2>
+          <div class="payment-options">
+            <label><input type="radio" name="paymode" value="UPI" checked />
+              <span>📱 UPI</span></label>
+            <label><input type="radio" name="paymode" value="Card" />
+              <span>💳 Credit / Debit Card</span></label>
+            <label><input type="radio" name="paymode" value="Cash" />
+              <span>💵 Cash at counter</span></label>
+          </div>
+          <button class="primary full" onclick="completePayment()">
+            Pay Now
+          </button>
+          <p class="tiny">Demo only: no real money is charged.</p>
+        </aside>
+      </div>
+      <div id="paymentGreeting" class="greeting hidden"></div>
+    </section>
+
+    <!-- ADMIN -->
+    <section id="admin" class="page">
+      <div class="page-title">
+        <p class="eyebrow">RESTAURANT CONTROL</p>
+        <h1>Admin Dashboard</h1>
+        <p>Monitor every table and its active orders.</p>
+      </div>
+      <div class="admin-toolbar">
+        <div>
+          <span class="admin-live-dot"></span>
+          <span id="adminUpdatedAt" class="muted">Supabase restaurant overview</span>
+        </div>
+        <div class="admin-actions">
+          <button class="secondary" onclick="fetchAdminDashboard()">↻ Refresh</button>
+          <button class="secondary" onclick="showPage('analytics')">View Analytics</button>
+          <button class="primary" onclick="showPage('chef')">Chef Dashboard</button>
+        </div>
+      </div>
+      <div class="stats admin-stats" id="adminStats">
+        <div class="stat"><small>Dashboard</small><b>Loading…</b></div>
+      </div>
+
+      <!-- UNIQUE HOTEL QR CODE GENERATOR -->
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">CUSTOMER SCAN ACCESS</p>
+          <h2>Restaurant QR Code</h2>
+        </div>
+      </div>
+      <div class="summary-card qr-generator-card">
+        <div class="qr-preview-panel" id="qrPrintArea">
+          <span class="badge">SCAN TO ORDER</span>
+          <div id="adminQrCanvas" class="qr-canvas-box" aria-label="Generated Hotel QR code"></div>
+          <b id="qrCardTitle" class="qr-card-title">QR Dine Demo Hotel</b>
+          <span id="qrCardSubtitle" class="tiny">Scan & select your table (01–12)</span>
+        </div>
+
+        <div class="qr-controls-panel">
+          <div>
+            <h3>Unique Hotel QR Code</h3>
+            <p class="muted">
+              One single QR code for your entire restaurant. When customers scan it, QR Dine opens and prompts them to tap their table number (<b>01–12</b>).
+            </p>
+          </div>
+
+          <div class="form-grid qr-form-grid">
+            <label class="field-label">Hotel ID
+              <input id="qrHotelCodeInput" type="text" value="HOTEL1" readonly />
+            </label>
+
+            <label class="field-label">Hosted App Base URL
+              <input id="qrBaseUrlInput" type="url" placeholder="https://your-site.com/index.html" oninput="renderAdminQr()" />
+            </label>
+          </div>
+
+          <div class="qr-url-box">
+            <span class="eyebrow">ENCODED HOTEL SCAN URL</span>
+            <code id="qrEncodedUrl">https://...</code>
+          </div>
+
+          <p id="qrLocalhostWarning" class="tiny qr-warning hidden">
+            Note: You are currently viewing on localhost/file. Phones cannot open localhost links—enter your live hosted URL (or local network IP) above before printing.
+          </p>
+
+          <div class="qr-action-buttons">
+            <button type="button" class="primary" onclick="downloadAdminQr()">⬇ Download PNG</button>
+            <button type="button" class="secondary" onclick="printAdminQr()">🖨 Print QR Card</button>
+            <button type="button" class="secondary" onclick="copyAdminQrLink()">📋 Copy Link</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">RESTAURANT FLOOR</p>
+          <h2>Table-wise orders</h2>
+        </div>
+        <span class="muted" id="adminOrderCount">Loading orders…</span>
+      </div>
+      <div id="tableOrders" class="table-grid"></div>
+    </section>
+
+    <!-- ANALYTICS -->
+    <section id="analytics" class="page">
+      <div class="page-title">
+        <p class="eyebrow">BUSINESS INSIGHTS</p>
+        <h1>Analytics & Menu Management</h1>
+        <p>Sales performance, stock planning and menu controls.</p>
+      </div>
+      <div id="analyticsStats" class="stats"></div>
+
+      <div class="analytics-grid">
+        <div class="summary-card">
+          <h2>Top-selling items</h2>
+          <div id="topItems"></div>
+        </div>
+        <div class="summary-card">
+          <h2>Slow-selling items</h2>
+          <div id="lowItems"></div>
+        </div>
+        <div class="summary-card wide">
+          <h2>Ingredient purchase suggestions</h2>
+          <p class="muted">
+            Estimated from recorded item sales and sample ingredient recipes.
+          </p>
+          <div id="ingredientList"></div>
+        </div>
+        <div class="summary-card wide">
+          <h2>Today's special</h2>
+          <div id="specialAdmin"></div>
+        </div>
+      </div>
+
+      <div class="section-heading">
+        <h2>Manage menu</h2>
+        <button class="primary" onclick="openAddFood()">+ Add food</button>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Food</th>
+              <th>Price</th>
+              <th>Category</th>
+              <th>Availability</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="manageMenu"></tbody>
+        </table>
+      </div>
+
+      <div class="summary-card editor">
+        <h2 id="editorTitle">Add / Edit menu item</h2>
+        <div class="form-grid">
+          <input id="foodId" type="hidden" />
+          <label>Food name<input id="foodName" placeholder="Food name" /></label>
+          <label>Price (₹)<input id="foodPrice" type="number" min="1" placeholder="Price" /></label>
+          <label>Category<input id="foodCategory" placeholder="Main Course" /></label>
+          <label>Preparation time (minutes)<input id="foodTime" type="number" min="1" value="15" /></label>
+          <label class="wide">Image URL<input id="foodImage" placeholder="images/dishes/my-dish.jpg" /></label>
+          <label class="wide">Description<input id="foodDescription" placeholder="Short description" /></label>
+          <label class="wide">Ingredients (comma separated)<input id="foodIngredients"
+              placeholder="Rice, vegetables, spices" /></label>
+        </div>
+        <div class="editor-actions">
+          <button class="primary" onclick="saveFood()">Save item</button>
+          <button class="secondary" onclick="clearFoodForm()">Clear</button>
+        </div>
+        <p class="tiny">
+          Mark an item unavailable when it is finished for the day.
+        </p>
+      </div>
+    </section>
+
+    <!-- CHEF -->
+    <section id="chef" class="page">
+      <div class="page-title">
+        <p class="eyebrow">KITCHEN DISPLAY</p>
+        <h1>Chef Dashboard</h1>
+        <p>View orders by table and update each food item manually.</p>
+      </div>
+      <div id="chefOrders" class="chef-grid"></div>
+    </section>
+  </main>
+
+  <!-- FOOD ITEM DETAILS MODAL -->
+  <div id="foodDetailsModal" class="login-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="foodModalTitle" onclick="if (event.target === this) closeFoodDetails()">
+    <div class="food-modal-card">
+      <button type="button" class="food-modal-close" onclick="closeFoodDetails()" aria-label="Close dish details">×</button>
+      <div class="food-modal-media">
+        <img id="foodModalImage" src="images/dishes/default-food.svg" alt="" onerror="this.src='images/dishes/default-food.svg'" />
+        <span id="foodModalSpecial" class="badge food-modal-special hidden">TODAY'S SPECIAL</span>
+      </div>
+      <div class="food-modal-body">
+        <div class="food-modal-meta">
+          <span id="foodModalCategory" class="pill">Category</span>
+          <span id="foodModalTime" class="tiny">⏱ 15 mins</span>
+        </div>
+        <div class="food-modal-title-row">
+          <h2 id="foodModalTitle">Dish Name</h2>
+          <b id="foodModalPrice" class="food-modal-price">₹0.00</b>
+        </div>
+        <p id="foodModalDescription" class="food-modal-desc"></p>
+
+        <div class="food-modal-section">
+          <p class="eyebrow">INGREDIENTS</p>
+          <div id="foodModalIngredients" class="ingredient-tags"></div>
+        </div>
+
+        <div class="food-modal-footer">
+          <div class="modal-qty-control" aria-label="Select quantity">
+            <button type="button" onclick="changeModalQty(-1)" aria-label="Decrease quantity">−</button>
+            <b id="foodModalQty">1</b>
+            <button type="button" onclick="changeModalQty(1)" aria-label="Increase quantity">+</button>
+          </div>
+          <button type="button" id="foodModalAddBtn" class="primary food-modal-add" onclick="addModalFoodToCart()">
+            Add to Cart · ₹0.00
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABLE SELECTION -->
+  <div id="tableSelectionModal" class="login-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="tableSelectionTitle">
+    <div class="login-card table-selection-card">
+      <button type="button" class="login-close" onclick="closeTableSelection()">×</button>
+      <span class="brand-mark login-mark">QD</span>
+      <p class="eyebrow">YOUR DINING TABLE</p>
+      <h2 id="tableSelectionTitle">Select your table</h2>
+      <p class="muted">Tap the table number printed on your table.</p>
+      <div id="tableButtonGrid" class="table-button-grid">
+        <button type="button" class="table-choice" onclick="chooseTable(1)">01</button>
+        <button type="button" class="table-choice" onclick="chooseTable(2)">02</button>
+        <button type="button" class="table-choice" onclick="chooseTable(3)">03</button>
+        <button type="button" class="table-choice" onclick="chooseTable(4)">04</button>
+        <button type="button" class="table-choice" onclick="chooseTable(5)">05</button>
+        <button type="button" class="table-choice" onclick="chooseTable(6)">06</button>
+        <button type="button" class="table-choice" onclick="chooseTable(7)">07</button>
+        <button type="button" class="table-choice" onclick="chooseTable(8)">08</button>
+        <button type="button" class="table-choice" onclick="chooseTable(9)">09</button>
+        <button type="button" class="table-choice" onclick="chooseTable(10)">10</button>
+        <button type="button" class="table-choice" onclick="chooseTable(11)">11</button>
+        <button type="button" class="table-choice" onclick="chooseTable(12)">12</button>
+      </div>
+      <p id="tableSelectionError" class="login-error"></p>
+    </div>
+  </div>
+
+  <!-- STAFF LOGIN -->
+  <div id="staffLoginModal" class="login-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+    <form class="login-card" onsubmit="staffLogin(event)">
+      <button type="button" class="login-close" onclick="closeStaffLogin()">
+        ×
+      </button>
+      <span class="brand-mark login-mark">QD</span>
+      <p class="eyebrow">RESTRICTED STAFF AREA</p>
+      <h2 id="loginTitle">Staff Login</h2>
+      <p class="muted">Sign in as an administrator or chef.</p>
+      <label class="field-label">Role
+        <select id="loginRole" onchange="updateLoginHint()">
+          <option value="admin">Admin</option>
+          <option value="chef">Chef</option>
+        </select>
+      </label>
+      <label class="field-label">Username<input id="loginUsername" required autocomplete="username"
+          placeholder="Enter username" /></label>
+      <label class="field-label">Password<input id="loginPassword" type="password" required
+          autocomplete="current-password" placeholder="Enter password" /></label>
+      <button class="primary full" type="submit">Login</button>
+      <p id="loginError" class="login-error"></p>
+      <p class="tiny">Demo credentials are listed in README.txt.</p>
+    </form>
+  </div>
+
+  <footer>
+    © 2026 QR Dine · Smart ordering for a better dining experience
+  </footer>
+  <div id="toast" class="toast"></div>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>
