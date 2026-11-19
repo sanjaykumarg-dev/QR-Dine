@@ -131,8 +131,13 @@ function showPage(id) {
     initAdminQrGenerator();
     fetchAdminDashboard();
   }
-  if (id === "analytics") renderAnalytics();
-  if (id === "chef") renderChef();
+  if (id === "analytics") {
+    fetchLiveAnalytics();
+  }
+  if (id === "chef") {
+    fetchChefOrders();
+    subscribeChefOrders();
+  }
 
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -252,7 +257,17 @@ function updateStaffNavigation() {
     .classList.toggle("hidden", !staffRole);
 }
 
-function staffLogout() {
+async function staffLogout() {
+  if (chefOrdersChannel) {
+    supabaseClient.removeChannel(chefOrdersChannel);
+    chefOrdersChannel = null;
+  }
+  try {
+    await supabaseClient.auth.signOut();
+  } catch (e) {
+    console.error("Sign out error:", e);
+  }
+  staffUser = null;
   staffRole = null;
   sessionStorage.removeItem("qd_staff_role");
   updateStaffNavigation();
@@ -286,6 +301,8 @@ async function chooseTable(number) {
   if (changed === false) return;
 
   sessionStorage.setItem("qd_selected_table", String(number));
+  trackingTokens = load(`qd_trackingTokens_T${tableNo}`, []);
+  trackedOrders = [];
   closeTableSelection();
   await fetchFoods();
 }
@@ -679,6 +696,7 @@ async function placeOrder() {
     }
   }
 
+  save(`qd_trackingTokens_T${tableNo}`, trackingTokens);
   save("qd_trackingTokens", trackingTokens);
 
   cart = [];
@@ -1535,12 +1553,75 @@ async function setItemStatus(itemId, status) {
   await fetchChefOrders();
 }
 
-/* ANALYTICS */
+/* ANALYTICS - LIVE SUPABASE DATA */
 
-function renderAnalytics() {
+async function fetchLiveAnalytics() {
+  if (staffRole !== "admin") return;
+
+  const statsBox = document.getElementById("analyticsStats");
+  if (statsBox) {
+    statsBox.innerHTML = '<div class="stat"><small>Analytics</small><b>Loading…</b></div>';
+  }
+
+  try {
+    if (!foods.length) {
+      await fetchFoods();
+    }
+
+    const { data: orderRows, error: orderError } = await supabaseClient
+      .from("orders")
+      .select("id, order_number, table_number, status, total_amount, payable_amount, is_paid, created_at")
+      .eq("hotel_id", STAFF_HOTEL_ID)
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (orderError) throw orderError;
+
+    const orderIds = (orderRows || []).map((o) => o.id);
+    let itemRows = [];
+
+    if (orderIds.length) {
+      const { data, error } = await supabaseClient
+        .from("order_items")
+        .select("id, order_id, food_id, food_name, quantity, price, status")
+        .in("order_id", orderIds);
+      if (error) throw error;
+      itemRows = data || [];
+    }
+
+    const itemsByOrder = {};
+    itemRows.forEach((item) => {
+      (itemsByOrder[item.order_id] ||= []).push({
+        id: item.food_id,
+        name: item.food_name,
+        qty: Number(item.quantity || 0),
+        price: Number(item.price || 0),
+        status: item.status,
+      });
+    });
+
+    const liveOrders = (orderRows || []).map((o) => ({
+      id: o.id,
+      orderNumber: o.order_number,
+      table: o.table_number,
+      status: o.status,
+      paid: o.is_paid === true,
+      paidAmount: Number(o.payable_amount ?? o.total_amount ?? 0),
+      items: itemsByOrder[o.id] || [],
+    }));
+
+    renderAnalytics(liveOrders);
+  } catch (error) {
+    console.error("Live analytics error:", error);
+    toast("Could not load live analytics: " + (error.message || "Check connection."));
+    renderAnalytics(orders);
+  }
+}
+
+function renderAnalytics(sourceOrders = orders) {
   let counts = {};
 
-  orders.forEach((o) => {
+  sourceOrders.forEach((o) => {
     o.items.forEach((i) => {
       counts[i.id] = (counts[i.id] || 0) + i.qty;
     });
@@ -1553,14 +1634,14 @@ function renderAnalytics() {
     }))
     .sort((a, b) => b.sold - a.sold);
 
-  let revenue = orders
+  let revenue = sourceOrders
     .filter((o) => o.paid)
     .reduce((s, o) => s + (o.paidAmount || 0), 0);
 
   let units = Object.values(counts).reduce((a, b) => a + b, 0);
 
   document.getElementById("analyticsStats").innerHTML = [
-    ["Total orders", orders.length],
+    ["Total orders", sourceOrders.length],
     ["Items sold", units],
     ["Paid revenue", money(revenue)],
     ["Menu items", foods.length],
@@ -1899,7 +1980,7 @@ async function saveFood() {
     if (result.error) throw result.error;
 
     await fetchFoods();
-    renderAnalytics();
+    await fetchLiveAnalytics();
     clearFoodForm();
     toast(
       id
@@ -1941,7 +2022,7 @@ async function toggleFood(id) {
   }
 
   await fetchFoods();
-  renderAnalytics();
+  await fetchLiveAnalytics();
   toast(nextAvailable ? "Item restored." : "Item marked as finished.");
 }
 
@@ -1972,7 +2053,7 @@ async function deleteFood(id) {
   }
 
   await fetchFoods();
-  renderAnalytics();
+  await fetchLiveAnalytics();
   clearFoodForm();
   toast("Food item deleted.");
 }
@@ -2021,7 +2102,7 @@ async function chooseSpecial() {
   }
 
   await fetchFoods();
-  renderAnalytics();
+  await fetchLiveAnalytics();
   toast("Today's special updated.");
 }
 

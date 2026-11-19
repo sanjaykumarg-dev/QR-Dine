@@ -1261,13 +1261,61 @@ footer {
   }
 }
 
+.table-short-prefix {
+  display: none;
+}
+
 @media (max-width: 640px) {
   .topbar {
-    padding: 0 14px;
+    gap: 6px;
+    height: 64px;
+    padding: 0 10px;
+  }
+
+  .brand {
+    flex-shrink: 0;
+    gap: 7px;
+  }
+
+  .brand-mark {
+    border-radius: 10px;
+    font-size: 13px;
+    height: 34px;
+    width: 34px;
+  }
+
+  .brand b {
+    font-size: 12px;
+    letter-spacing: 1px;
+    white-space: nowrap;
   }
 
   .brand small {
     display: none;
+  }
+
+  .header-right {
+    flex-shrink: 0;
+    gap: 5px;
+  }
+
+  .header-right .secondary,
+  .header-right .icon-btn,
+  .header-right .menu-toggle {
+    border-radius: 10px;
+    font-size: 12px;
+    min-height: 34px;
+    padding: 6px 8px;
+    white-space: nowrap;
+  }
+
+  .table-prefix,
+  .table-suffix {
+    display: none;
+  }
+
+  .table-short-prefix {
+    display: inline;
   }
 
   .menu-toggle {

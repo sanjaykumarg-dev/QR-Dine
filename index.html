@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
-  <link rel="stylesheet" href="style.css?v=20261119b" />
+  <link rel="stylesheet" href="style.css?v=20261119-final" />
 </head>
 
 <body>
@@ -21,8 +21,8 @@
       <span><b>QR DINE</b><small>SMART TABLE SERVICE</small></span>
     </a>
     <div class="header-right">
-      <button id="changeTableBtn" class="secondary customer-control" onclick="showTableSelection()">
-        Table <span id="currentTableLabel">01</span> · Change
+      <button id="changeTableBtn" class="secondary customer-control" onclick="showTableSelection()" aria-label="Change dining table">
+        <span class="table-prefix">Table </span><span class="table-short-prefix">T</span><span id="currentTableLabel">01</span><span class="table-suffix"> · Change</span>
       </button>
       <button class="icon-btn customer-control" onclick="openCartPanel()" aria-label="View cart">
         🛒 <span id="cartCount">0</span>
@@ -473,7 +473,7 @@
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase.js"></script>
-  <script src="app.js?v=20261119b"></script>
+  <script src="app.js?v=20261119-final"></script>
 </body>
 
 </html>
