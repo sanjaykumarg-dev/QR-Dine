@@ -5,76 +5,6 @@ const supabaseClient = window.qrDineSupabase;
 const money = (n) => "₹" + Number(n || 0).toFixed(2);
 const imageFallback = "images/dishes/default-food.svg";
 
-const initialFoods = [
-  {
-    id: 1,
-    name: "Paneer Tikka Bowl",
-    category: "Main Course",
-    price: 220,
-    time: 18,
-    description: "Smoky paneer, fresh vegetables and mint yoghurt.",
-    image: "images/dishes/paneer-tikka.png",
-    ingredients: ["Paneer", "Rice", "Capsicum", "Yoghurt"],
-    available: true,
-    special: true,
-  },
-  {
-    id: 2,
-    name: "Masala Dosa",
-    category: "South Indian",
-    price: 110,
-    time: 12,
-    description: "Crispy dosa served with sambar and coconut chutney.",
-    image: "images/dishes/masala-dosa.jpeg",
-    ingredients: ["Rice batter", "Potato", "Onion"],
-    available: true,
-  },
-  {
-    id: 3,
-    name: "Veg Biryani",
-    category: "Main Course",
-    price: 180,
-    time: 20,
-    description: "Aromatic basmati rice cooked with garden vegetables.",
-    image: "images/dishes/veg-biryani.jpeg",
-    ingredients: ["Rice", "Vegetables", "Spices"],
-    available: true,
-  },
-  {
-    id: 4,
-    name: "Margherita Pizza",
-    category: "Pizza",
-    price: 250,
-    time: 22,
-    description: "Classic pizza with tomato, mozzarella and basil.",
-    image: "images/dishes/pizza.jpeg",
-    ingredients: ["Flour", "Cheese", "Tomato"],
-    available: true,
-  },
-  {
-    id: 5,
-    name: "Fresh Lime Soda",
-    category: "Beverages",
-    price: 70,
-    time: 5,
-    description: "Refreshing lime soda, sweet or salted.",
-    image: "images/dishes/lime-soda.jpeg",
-    ingredients: ["Lime", "Soda", "Sugar"],
-    available: true,
-  },
-  {
-    id: 6,
-    name: "Chocolate Brownie",
-    category: "Dessert",
-    price: 95,
-    time: 10,
-    description: "Warm chocolate brownie with a rich cocoa flavour.",
-    image: "images/dishes/brownie.jpeg",
-    ingredients: ["Chocolate", "Flour", "Butter"],
-    available: true,
-  },
-];
-
 function load(key, fallback) {
   try {
     return JSON.parse(localStorage.getItem(key)) ?? fallback;
@@ -87,7 +17,6 @@ function save(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
-// Food menu is loaded from Supabase. Orders and cart remain local for now.
 let foods = [];
 
 async function fetchFoods() {
@@ -126,7 +55,8 @@ const HOTEL_NAME = "QR Dine Demo Hotel";
 const MENU_IMAGES_BUCKET = "menu-images";
 const urlParams = new URLSearchParams(location.search);
 
-let tableNo = Number(urlParams.get("table")) || 1;
+const savedSessionTable = Number(sessionStorage.getItem("qd_selected_table"));
+let tableNo = Number(urlParams.get("table")) || (savedSessionTable >= 1 && savedSessionTable <= 12 ? savedSessionTable : 1);
 let qrCode =
   urlParams.get("qr") || `${HOTEL_CODE}-TABLE${String(tableNo).padStart(2, "0")}`;
 let activeCategory = "All";
@@ -140,11 +70,6 @@ let activeModalFoodId = null;
 let modalFoodQty = 1;
 let selectedFoodImageFile = null;
 let selectedFoodPreviewUrl = null;
-
-const STAFF_CREDENTIALS = {
-  admin: { username: "admin", password: "admin123" },
-  chef: { username: "chef", password: "chef123" },
-};
 
 const statusOptions = ["Pending", "Preparing", "Ready", "Served"];
 
@@ -271,6 +196,7 @@ async function staffLogin(event) {
 
     staffUser = data.user;
     staffRole = staff.role;
+    sessionStorage.setItem("qd_staff_role", staffRole);
 
     const target =
       pendingStaffPage || (staffRole === "admin" ? "admin" : "chef");
@@ -347,6 +273,7 @@ async function chooseTable(number) {
   const changed = changeTable(number);
   if (changed === false) return;
 
+  sessionStorage.setItem("qd_selected_table", String(number));
   closeTableSelection();
   await fetchFoods();
 }
@@ -372,11 +299,8 @@ function changeTable(value) {
   }
 
   tableNo = next;
-
-  // Update the QR code along with the selected table
   qrCode = `${HOTEL_CODE}-TABLE${String(tableNo).padStart(2, "0")}`;
 
-  // Update URL parameters while preserving the hotel identifier
   const url = new URL(window.location.href);
   url.searchParams.set("hotel", HOTEL_CODE);
   url.searchParams.set("table", String(tableNo));
@@ -489,7 +413,6 @@ function renderMenu() {
     )
     .join("");
 
-  // Search by dish name, description, or category.
   const search = (
     document.getElementById("menuSearch")?.value || ""
   ).trim().toLowerCase();
@@ -515,7 +438,6 @@ function renderMenu() {
          <p>Try another dish name or choose a different category.</p>
        </div>`;
 
-  // Keep the inline cart synchronized whenever the menu is rendered.
   renderCart();
 }
 
@@ -667,7 +589,7 @@ function renderCart() {
         .map(
           (i) => `
  <div class="cart-row">
-   <img src="${i.image}" onerror="this.src='${imageFallback}'">
+   <img src="${i.image || imageFallback}" onerror="this.src='${imageFallback}'">
    <div class="cart-info">
      <h3>${i.name}</h3>
      <p>${money(i.price)} each · ${i.time} min preparation</p>
@@ -718,7 +640,6 @@ async function placeOrder() {
     return;
   }
 
-  // Keep a temporary local copy so the existing waiting page can display it.
   const newOrder = {
     id: data.order_id,
     orderNumber: data.order_number,
@@ -739,7 +660,6 @@ async function placeOrder() {
   currentOrderId = data.order_id;
   save("qd_currentOrder", currentOrderId);
 
-  // Save this order's tracking token permanently in this browser
   if (data.tracking_token && !trackingTokens.includes(data.tracking_token)) {
     trackingTokens.push(data.tracking_token);
   }
@@ -833,7 +753,6 @@ async function renderWaiting() {
     return;
   }
 
-  // Keep the latest order available for existing payment functions
   const latest = trackedOrders[trackedOrders.length - 1];
 
   orders = trackedOrders;
@@ -857,7 +776,7 @@ async function renderWaiting() {
               </span>
               <h2>Table ${String(order.table).padStart(2, "0")}</h2>
             </div>
-            <span class="status">${order.status}</span>
+            <span class="status ${order.status}">${order.status}</span>
           </div>
 
           <p class="muted">
@@ -897,12 +816,10 @@ async function renderWaiting() {
 }
 
 function startCustomerTracking() {
-  // Prevent multiple timers
   if (customerTrackingTimer) {
     clearInterval(customerTrackingTimer);
   }
 
-  // Check for updated order statuses every 3 seconds
   customerTrackingTimer = setInterval(async () => {
     if (document.hidden) return;
 
@@ -1398,7 +1315,6 @@ function subscribeChefOrders() {
       async (payload) => {
         console.log("NEW ORDER EVENT:", payload);
         await fetchChefOrders();
-        console.log("Chef orders refreshed");
       },
     )
     .on(
@@ -1411,7 +1327,6 @@ function subscribeChefOrders() {
       async (payload) => {
         console.log("ORDER ITEM EVENT:", payload);
         await fetchChefOrders();
-        console.log("Chef orders refreshed");
       },
     )
     .subscribe((status, error) => {
@@ -1992,6 +1907,7 @@ async function restoreStaffSession() {
 
   staffUser = user;
   staffRole = staff.role;
+  sessionStorage.setItem("qd_staff_role", staffRole);
 
   updateStaffNavigation();
 
@@ -2005,23 +1921,21 @@ async function init() {
 
   updateHeader();
 
-  // Restore the existing Supabase staff session
   await restoreStaffSession();
 
-  // Every customer scanning the unique hotel QR selects their table number (01–12).
-  if (!urlParams.has("table") && !staffRole) {
+  const hasSelectedTable =
+    urlParams.has("table") ||
+    (savedSessionTable >= 1 && savedSessionTable <= 12);
+
+  if (!hasSelectedTable && !staffRole) {
     showTableSelection();
   } else {
     await fetchFoods();
   }
 
-  // Automatically open the kitchen dashboard
   if (staffRole === "chef") {
     await fetchChefOrders();
     showPage("chef");
-  }
-
-  if (staffRole === "chef") {
     subscribeChefOrders();
   }
 }
