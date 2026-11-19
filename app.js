@@ -923,6 +923,8 @@ function applyDiscount() {
   updatePayment();
 }
 
+let paymentRedirectTimer = null;
+
 function completePayment() {
   let o = getBillOrder();
 
@@ -942,6 +944,11 @@ function completePayment() {
   o.paidAt = paymentTime.toISOString();
   o.updatedAt = paymentTime.toISOString();
 
+  // Clear active order & coupon so a new order starts clean
+  currentOrderId = null;
+  save("qd_currentOrder", null);
+  discountRate = 0;
+
   persist();
 
   let greeting = document.getElementById("paymentGreeting");
@@ -949,13 +956,37 @@ function completePayment() {
   greeting.classList.remove("hidden");
 
   greeting.innerHTML = `
-<h2>Thank you for dining with QR Dine! 🎉</h2>
-<p>Payment: ${money(bill.total)}</p>
-<p>Payment Mode: ${mode}</p>
-<p>Payment Time: ${paymentTime.toLocaleString("en-IN")}</p>
-<p>We hope to serve you again.</p>`;
+    <h2>Thank you for dining with QR Dine! 🎉</h2>
+    <p>Payment: ${money(bill.total)}</p>
+    <p>Payment Mode: ${mode}</p>
+    <p>Payment Time: ${paymentTime.toLocaleString("en-IN")}</p>
+    <p class="muted">Returning to the menu in 3 seconds...</p>
+    <button type="button" class="primary" onclick="returnToMenuAfterPayment()">Back to Menu Now</button>
+  `;
 
-  toast("Demo payment completed.");
+  toast("Payment completed! Returning to menu...");
+
+  if (paymentRedirectTimer) clearTimeout(paymentRedirectTimer);
+  paymentRedirectTimer = setTimeout(() => {
+    returnToMenuAfterPayment();
+  }, 3000);
+}
+
+function returnToMenuAfterPayment() {
+  if (paymentRedirectTimer) {
+    clearTimeout(paymentRedirectTimer);
+    paymentRedirectTimer = null;
+  }
+
+  const greeting = document.getElementById("paymentGreeting");
+  if (greeting) greeting.classList.add("hidden");
+
+  const codeInput = document.getElementById("discountCode");
+  const codeMsg = document.getElementById("discountMessage");
+  if (codeInput) codeInput.value = "";
+  if (codeMsg) codeMsg.textContent = "";
+
+  showPage("menu");
 }
 
 /* UNIQUE HOTEL QR CODE GENERATOR */
