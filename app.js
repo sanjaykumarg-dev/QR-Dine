@@ -5,6 +5,15 @@ const supabaseClient = window.qrDineSupabase;
 const money = (n) => "₹" + Number(n || 0).toFixed(2);
 const imageFallback = "images/dishes/default-food.svg";
 
+function formatOrderCode(raw) {
+  const str = String(raw || "").trim();
+  if (!str) return "#ORD";
+  if (str.length <= 10) return str.startsWith("#") ? str : "#" + str;
+  const parts = str.split("-");
+  const tail = parts[parts.length - 1] || str;
+  return "#" + tail.slice(-6).toUpperCase();
+}
+
 function load(key, fallback) {
   try {
     return JSON.parse(localStorage.getItem(key)) ?? fallback;
@@ -776,7 +785,7 @@ async function renderWaiting() {
           <div class="order-head">
             <div>
               <span class="eyebrow">
-                ORDER ${order.orderNumber}
+                ORDER ${formatOrderCode(order.orderNumber || order.id)}
               </span>
               <h2>Table ${String(order.table).padStart(2, "0")}</h2>
             </div>
@@ -929,7 +938,7 @@ function applyDiscount() {
   updatePayment();
 }
 
-function completePayment() {
+async function completePayment() {
   let o = getBillOrder();
 
   if (!o) {
@@ -937,42 +946,83 @@ function completePayment() {
     return;
   }
 
-  let bill = updatePayment();
-  let mode = document.querySelector('input[name="paymode"]:checked').value;
+  if (o.paid) {
+    toast("This order is already paid.");
+    return;
+  }
 
-  const paymentTime = new Date();
+  const payBtn = document.querySelector('#payment button.primary');
+  if (payBtn) {
+    payBtn.disabled = true;
+    payBtn.textContent = "Processing payment...";
+  }
 
-  o.paid = true;
-  o.paymentMode = mode;
-  o.paidAmount = bill.total;
-  o.paidAt = paymentTime.toISOString();
-  o.updatedAt = paymentTime.toISOString();
+  try {
+    // Match exact SQL rounding: tax = round(food * 0.05, 2), discount = round(food * 0.10, 2)
+    const items = o.items || [];
+    const food = Number(items.reduce((s, i) => s + i.price * i.qty, 0).toFixed(2));
+    const taxValue = Number((food * 0.05).toFixed(2));
+    const appliedCode = discountRate > 0 ? "DINE10" : null;
+    const discountValue = appliedCode === "DINE10" ? Number((food * 0.1).toFixed(2)) : 0;
+    const exactPayable = Number(Math.max(0, food + taxValue - discountValue).toFixed(2));
 
-  currentOrderId = null;
-  save("qd_currentOrder", null);
-  discountRate = 0;
+    const mode = document.querySelector('input[name="paymode"]:checked').value;
+    const paymentRequestId = crypto.randomUUID();
 
-  persist();
+    if (o.trackingToken) {
+      const { data, error } = await supabaseClient.rpc("record_simulated_payment", {
+        p_tracking_token: o.trackingToken,
+        p_payment_method: mode,
+        p_amount: exactPayable,
+        p_discount_code: appliedCode,
+        p_payment_request_id: paymentRequestId,
+      });
 
-  let greeting = document.getElementById("paymentGreeting");
+      if (error) throw error;
+      o.paid = data?.is_paid !== undefined ? Boolean(data.is_paid) : true;
+    } else {
+      o.paid = true;
+    }
 
-  greeting.classList.remove("hidden");
+    const paymentTime = new Date();
+    o.paymentMode = mode;
+    o.paidAmount = exactPayable;
+    o.paidAt = paymentTime.toISOString();
+    o.updatedAt = paymentTime.toISOString();
 
-  greeting.innerHTML = `
-    <h2>Thank you for dining with QR Dine! 🎉</h2>
-    <p>Payment: ${money(bill.total)}</p>
-    <p>Payment Mode: ${mode}</p>
-    <p>Payment Time: ${paymentTime.toLocaleString("en-IN")}</p>
-    <p class="muted">Returning to the menu shortly...</p>
-    <button type="button" class="primary" onclick="returnToMenuAfterPayment()">Back to Menu Now</button>
-  `;
+    currentOrderId = null;
+    save("qd_currentOrder", null);
+    discountRate = 0;
 
-  toast("Payment completed! Returning to menu...");
+    persist();
 
-  if (paymentRedirectTimer) clearTimeout(paymentRedirectTimer);
-  paymentRedirectTimer = setTimeout(() => {
-    returnToMenuAfterPayment();
-  }, 1500);
+    const greeting = document.getElementById("paymentGreeting");
+    greeting.classList.remove("hidden");
+    greeting.innerHTML = `
+      <h2>Thank you for dining with QR Dine! 🎉</h2>
+      <p>Order: <b>${formatOrderCode(o.orderNumber || o.id)}</b></p>
+      <p>Payment: ${money(exactPayable)}</p>
+      <p>Payment Mode: ${mode}</p>
+      <p>Payment Time: ${paymentTime.toLocaleString("en-IN")}</p>
+      <p class="muted">Returning to the menu shortly...</p>
+      <button type="button" class="primary" onclick="returnToMenuAfterPayment()">Back to Menu Now</button>
+    `;
+
+    toast("Payment recorded! Returning to menu...");
+
+    if (paymentRedirectTimer) clearTimeout(paymentRedirectTimer);
+    paymentRedirectTimer = setTimeout(() => {
+      returnToMenuAfterPayment();
+    }, 1500);
+  } catch (error) {
+    console.error("Payment RPC error:", error);
+    toast("Payment failed: " + (error.message || "Please try again."));
+  } finally {
+    if (payBtn) {
+      payBtn.disabled = false;
+      payBtn.textContent = "Pay Now";
+    }
+  }
 }
 
 function returnToMenuAfterPayment() {
@@ -1257,7 +1307,7 @@ async function fetchAdminDashboard() {
             const orderItems = itemsByOrder[order.id] || [];
             const orderStatus =
               order.status || (order.is_paid ? "Paid" : "Pending");
-            const orderLabel = order.order_number || order.id;
+            const orderLabel = formatOrderCode(order.order_number || order.id);
             const created = order.created_at
               ? new Date(order.created_at).toLocaleTimeString("en-IN", {
                   hour: "2-digit",
@@ -1419,7 +1469,7 @@ function renderChef() {
         <div class="order-card">
           <div class="order-head">
             <div>
-              <span class="eyebrow">${order.orderNumber}</span>
+              <span class="eyebrow">${formatOrderCode(order.orderNumber || order.id)}</span>
               <h2>Table ${String(order.table).padStart(2, "0")}</h2>
             </div>
             <span class="status">${overallStatus(order)}</span>
