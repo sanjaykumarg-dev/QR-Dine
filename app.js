@@ -5,6 +5,24 @@ const supabaseClient = window.qrDineSupabase;
 const money = (n) => "₹" + Number(n || 0).toFixed(2);
 const imageFallback = "images/dishes/default-food.svg";
 
+const DEFAULT_DISH_INGREDIENTS = {
+  "paneer tikka bowl": ["Paneer", "Rice", "Capsicum", "Yoghurt"],
+  "masala dosa": ["Rice batter", "Potato", "Onion"],
+  "veg biryani": ["Rice", "Vegetables", "Spices"],
+  "margherita pizza": ["Flour", "Cheese", "Tomato"],
+  "fresh lime soda": ["Lime", "Soda", "Sugar"],
+  "chocolate brownie": ["Chocolate", "Flour", "Butter"],
+  "parotta": ["Flour", "Oil", "Salt"],
+};
+
+function getDishIngredients(food) {
+  if (Array.isArray(food.ingredients) && food.ingredients.length > 0) {
+    return food.ingredients;
+  }
+  const key = String(food.name || "").trim().toLowerCase();
+  return DEFAULT_DISH_INGREDIENTS[key] || [];
+}
+
 function formatOrderCode(raw) {
   const str = String(raw || "").trim();
   if (!str) return "#ORD";
@@ -501,7 +519,7 @@ function openFoodDetails(id) {
     food.description || "Freshly prepared to order.";
 
   const ingredientsBox = document.getElementById("foodModalIngredients");
-  const ingredients = Array.isArray(food.ingredients) ? food.ingredients : [];
+  const ingredients = getDishIngredients(food);
   ingredientsBox.innerHTML = ingredients.length
     ? ingredients
         .map((ing) => `<span class="ingredient-tag">${adminEscape(ing)}</span>`)
@@ -1036,6 +1054,11 @@ async function completePayment() {
     payBtn.textContent = "Processing payment...";
   }
 
+  const ordersSnapshot = JSON.parse(JSON.stringify(orders));
+  const trackedSnapshot = JSON.parse(JSON.stringify(trackedOrders));
+  const prevCurrentOrderId = currentOrderId;
+  const prevDiscountRate = discountRate;
+
   try {
     const mode = document.querySelector('input[name="paymode"]:checked').value;
     const appliedCode = discountRate > 0 ? "DINE10" : null;
@@ -1107,8 +1130,14 @@ async function completePayment() {
       returnToMenuAfterPayment();
     }, 1500);
   } catch (error) {
+    orders = ordersSnapshot;
+    trackedOrders = trackedSnapshot;
+    currentOrderId = prevCurrentOrderId;
+    discountRate = prevDiscountRate;
+    persist();
+    updatePayment();
     console.error("Payment RPC error:", error);
-    toast("Payment failed: " + (error.message || "Please try again."));
+    toast("Payment rolled back due to error: " + (error.message || "Please try again."));
   } finally {
     if (payBtn) {
       payBtn.disabled = false;
@@ -1642,6 +1671,22 @@ async function fetchLiveAnalytics() {
       await fetchFoods();
     }
 
+    const { data: foodRows } = await supabaseClient
+      .from("foods")
+      .select("id, ingredients")
+      .eq("hotel_id", STAFF_HOTEL_ID);
+
+    if (Array.isArray(foodRows) && foodRows.length) {
+      const ingById = new Map(foodRows.map((r) => [r.id, r.ingredients]));
+      foods = foods.map((f) => ({
+        ...f,
+        ingredients:
+          Array.isArray(ingById.get(f.id)) && ingById.get(f.id).length
+            ? ingById.get(f.id)
+            : f.ingredients || [],
+      }));
+    }
+
     const { data: orderRows, error: orderError } = await supabaseClient
       .from("orders")
       .select("id, order_number, table_number, status, total_amount, payable_amount, is_paid, created_at")
@@ -1754,11 +1799,12 @@ function renderAnalytics(sourceOrders = orders) {
 
   let ingredients = {};
 
-  ranked.forEach((f) =>
-    (f.ingredients || []).forEach((ing) => {
+  ranked.forEach((f) => {
+    if (f.sold <= 0) return;
+    getDishIngredients(f).forEach((ing) => {
       ingredients[ing] = (ingredients[ing] || 0) + f.sold;
-    }),
-  );
+    });
+  });
 
   document.getElementById("ingredientList").innerHTML = Object.keys(ingredients)
     .length
