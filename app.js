@@ -785,36 +785,71 @@ async function renderWaiting() {
     return;
   }
 
-  const latest = trackedOrders[trackedOrders.length - 1];
   orders = trackedOrders;
-  if (!currentOrderId) currentOrderId = latest.id;
+  const unpaidOrders = trackedOrders.filter((o) => !o.paid);
+  const latestUnpaid = unpaidOrders[unpaidOrders.length - 1];
+  if (latestUnpaid) {
+    currentOrderId = latestUnpaid.id;
+  }
 
-  box.innerHTML = trackedOrders
-    .slice()
-    .reverse()
-    .map((order) => {
-      const maxTime = order.items.reduce(
+  // Group orders by table + payment state so multiple orders on the same table merge into one card
+  const groupedMap = new Map();
+  trackedOrders.forEach((order) => {
+    const groupKey = `${order.table}-${order.paid ? "paid" : "unpaid"}`;
+    if (!groupedMap.has(groupKey)) {
+      groupedMap.set(groupKey, {
+        table: order.table,
+        paid: order.paid,
+        orderIds: [order.id],
+        orderCodes: [formatOrderCode(order.orderNumber || order.id)],
+        items: order.items.map((item) => ({ ...item })),
+        primaryOrderId: order.id,
+      });
+    } else {
+      const group = groupedMap.get(groupKey);
+      group.orderIds.push(order.id);
+      group.orderCodes.push(formatOrderCode(order.orderNumber || order.id));
+      group.primaryOrderId = order.id;
+      order.items.forEach((item) => {
+        const existing = group.items.find(
+          (x) => x.id === item.id && x.status === item.status,
+        );
+        if (existing) {
+          existing.qty += item.qty;
+        } else {
+          group.items.push({ ...item });
+        }
+      });
+    }
+  });
+
+  const groupedOrders = Array.from(groupedMap.values()).reverse();
+
+  box.innerHTML = groupedOrders
+    .map((group) => {
+      const maxTime = group.items.reduce(
         (max, item) => Math.max(max, item.time || 0),
         0,
       );
+      const groupStatus = overallStatus(group);
 
       return `
         <div class="summary-card">
           <div class="order-head">
             <div>
               <span class="eyebrow">
-                ORDER ${formatOrderCode(order.orderNumber || order.id)}
+                ${group.orderCodes.length > 1 ? "ORDERS " + group.orderCodes.join(" · ") : "ORDER " + group.orderCodes[0]}
               </span>
-              <h2>Table ${String(order.table).padStart(2, "0")}</h2>
+              <h2>Table ${String(group.table).padStart(2, "0")}</h2>
             </div>
-            <span class="status ${order.status}">${order.status}</span>
+            <span class="status ${groupStatus}">${groupStatus}</span>
           </div>
 
           <p class="muted">
             Estimated preparation time: up to ${maxTime} minutes.
           </p>
 
-          ${order.items
+          ${group.items
             .map(
               (item) => `
             <div class="order-item">
@@ -832,14 +867,16 @@ async function renderWaiting() {
             )
             .join("")}
 
-          <p class="muted">
-            ${order.paid ? "Payment completed" : "Payment pending"}
-          </p>
-
-          <button class="primary"
-            onclick="trackOrderPayment(${order.id})">
-            View payment
-          </button>
+          <div class="summary-line" style="margin-top: 14px;">
+            <span class="muted">
+              ${group.paid ? "Payment completed" : "Payment pending"}
+            </span>
+            ${
+              group.paid
+                ? '<span class="status Ready">✓ Paid</span>'
+                : `<button class="primary" onclick="trackOrderPayment(${group.primaryOrderId})">View payment</button>`
+            }
+          </div>
         </div>
       `;
     })
@@ -898,8 +935,37 @@ function reorder() {
 
 /* PAYMENT */
 
+function getUnpaidTableOrders() {
+  const source = trackedOrders.length ? trackedOrders : orders;
+  const targetOrder =
+    source.find((o) => o.id === currentOrderId && !o.paid) ||
+    source.filter((o) => o.table === tableNo && !o.paid).slice(-1)[0];
+
+  if (!targetOrder) return [];
+  return source.filter((o) => o.table === targetOrder.table && !o.paid);
+}
+
 function getBillOrder() {
-  return getCurrentOrder();
+  const unpaidList = getUnpaidTableOrders();
+  if (!unpaidList.length) return null;
+
+  const mergedItems = [];
+  unpaidList.forEach((order) => {
+    (order.items || []).forEach((item) => {
+      const existing = mergedItems.find((x) => x.id === item.id);
+      if (existing) {
+        existing.qty += item.qty;
+      } else {
+        mergedItems.push({ ...item });
+      }
+    });
+  });
+
+  return {
+    ...unpaidList[unpaidList.length - 1],
+    items: mergedItems,
+    subOrders: unpaidList,
+  };
 }
 
 function updatePayment() {
@@ -920,7 +986,7 @@ function updatePayment() {
  </div>`,
         )
         .join("")
-    : "<p class='muted'>No order to bill yet.</p>";
+    : "<p class='muted'>No pending bill for this table.</p>";
 
   document.getElementById("foodBill").textContent = money(food);
   document.getElementById("gstAmount").textContent = money(gst);
@@ -959,13 +1025,8 @@ function applyDiscount() {
 async function completePayment() {
   let o = getBillOrder();
 
-  if (!o) {
-    toast("No order available for payment.");
-    return;
-  }
-
-  if (o.paid) {
-    toast("This order is already paid.");
+  if (!o || !o.subOrders?.length) {
+    toast("No unpaid order available for payment.");
     return;
   }
 
@@ -976,50 +1037,63 @@ async function completePayment() {
   }
 
   try {
-    // Match exact SQL rounding: tax = round(food * 0.05, 2), discount = round(food * 0.10, 2)
-    const items = o.items || [];
-    const food = Number(items.reduce((s, i) => s + i.price * i.qty, 0).toFixed(2));
-    const taxValue = Number((food * 0.05).toFixed(2));
-    const appliedCode = discountRate > 0 ? "DINE10" : null;
-    const discountValue = appliedCode === "DINE10" ? Number((food * 0.1).toFixed(2)) : 0;
-    const exactPayable = Number(Math.max(0, food + taxValue - discountValue).toFixed(2));
-
     const mode = document.querySelector('input[name="paymode"]:checked').value;
-    const paymentRequestId = crypto.randomUUID();
+    const appliedCode = discountRate > 0 ? "DINE10" : null;
+    const paymentTime = new Date();
+    let totalPaid = 0;
 
-    if (o.trackingToken) {
-      const { data, error } = await supabaseClient.rpc("record_simulated_payment", {
-        p_tracking_token: o.trackingToken,
-        p_payment_method: mode,
-        p_amount: exactPayable,
-        p_discount_code: appliedCode,
-        p_payment_request_id: paymentRequestId,
-      });
+    for (const sub of o.subOrders) {
+      const subFood = Number(
+        (sub.items || []).reduce((s, i) => s + i.price * i.qty, 0).toFixed(2),
+      );
+      const subTax = Number((subFood * 0.05).toFixed(2));
+      const subDiscount =
+        appliedCode === "DINE10" ? Number((subFood * 0.1).toFixed(2)) : 0;
+      const subPayable = Number(
+        Math.max(0, subFood + subTax - subDiscount).toFixed(2),
+      );
 
-      if (error) throw error;
-      o.paid = data?.is_paid !== undefined ? Boolean(data.is_paid) : true;
-    } else {
-      o.paid = true;
+      if (sub.trackingToken && subPayable > 0) {
+        const { data, error } = await supabaseClient.rpc(
+          "record_simulated_payment",
+          {
+            p_tracking_token: sub.trackingToken,
+            p_payment_method: mode,
+            p_amount: subPayable,
+            p_discount_code: appliedCode,
+            p_payment_request_id: crypto.randomUUID(),
+          },
+        );
+        if (error) throw error;
+        sub.paid = data?.is_paid !== undefined ? Boolean(data.is_paid) : true;
+      } else {
+        sub.paid = true;
+      }
+
+      sub.paymentMode = mode;
+      sub.paidAmount = subPayable;
+      sub.paidAt = paymentTime.toISOString();
+      sub.updatedAt = paymentTime.toISOString();
+      totalPaid += subPayable;
     }
 
-    const paymentTime = new Date();
-    o.paymentMode = mode;
-    o.paidAmount = exactPayable;
-    o.paidAt = paymentTime.toISOString();
-    o.updatedAt = paymentTime.toISOString();
+    const orderCodes = o.subOrders
+      .map((s) => formatOrderCode(s.orderNumber || s.id))
+      .join(" · ");
 
     currentOrderId = null;
     save("qd_currentOrder", null);
     discountRate = 0;
 
     persist();
+    updatePayment();
 
     const greeting = document.getElementById("paymentGreeting");
     greeting.classList.remove("hidden");
     greeting.innerHTML = `
       <h2>Thank you for dining with QR Dine! 🎉</h2>
-      <p>Order: <b>${formatOrderCode(o.orderNumber || o.id)}</b></p>
-      <p>Payment: ${money(exactPayable)}</p>
+      <p>Order: <b>${orderCodes}</b></p>
+      <p>Payment: ${money(totalPaid)}</p>
       <p>Payment Mode: ${mode}</p>
       <p>Payment Time: ${paymentTime.toLocaleString("en-IN")}</p>
       <p class="muted">Returning to the menu shortly...</p>
